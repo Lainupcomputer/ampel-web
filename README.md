@@ -20,3 +20,8 @@ Trafic Light Example
 
 # Free to use, edit and modify
 
+
+
+# Amazon Shopping List for startup[https://www.amazon.de/hz/wishlist/ls/2TJOEAK97CQPJ?ref_=wl_share]
+
+
