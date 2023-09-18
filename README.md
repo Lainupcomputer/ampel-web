@@ -22,6 +22,8 @@ Trafic Light Example
 
 
 
-# Amazon Shopping List for startup[https://www.amazon.de/hz/wishlist/ls/2TJOEAK97CQPJ?ref_=wl_share]
+# Amazon Shopping List for startup
+
+LIST [https://www.amazon.de/hz/wishlist/ls/2TJOEAK97CQPJ?ref_=wl_share]
 
 
