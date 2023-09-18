@@ -6,6 +6,7 @@ near field communication using wifi ,esp8266_NODE_MCU
 Trafic Light Example
 
 > Make sure your EEPROM is clean, else clean it up
+> 
 > you can use the code below to erase all date from the eeprom.
 > ```cpp 
 > // delete eeprom
