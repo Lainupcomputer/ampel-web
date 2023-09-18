@@ -5,13 +5,13 @@
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
 
-// FOR ESP-01* 
-// Use contents from "8266" for corret pin setup
+// FOR ESP-8266-Node-Mcu 
+// Use contents from "01" for corret pin setup
 
 int req = 100;
 int timeout = 30;                                 // Maximale Wartezeit für die Verbindung in Sekunden
 bool is_server = false;                           // If Device is Aserver or Client
-const int ledPin = 2;                            // Der Pin, der anzeigt ob wlan verbunden wird
+const int ledPin = D5;                            // Der Pin, der anzeigt ob wlan verbunden wird
 const char* ssid = "Ampel";                       // Standard-SSID
 const char* password = "pass";                    // Standard-Passwort
 
@@ -21,14 +21,18 @@ HTTPClient http;
 // Ampel Steuerung
 int step = 0;
 int last = 0;
-const int red = 1;                               // Pin Für die Steuerung des Lichtes: Rot
-const int yellow = 2;                            // Pin Für die Steuerung des Lichtes: Gelb
-const int green = 3;                             // Pin Für die Steuerung des Lichtes: Grün
+const int red = D7;                               // Pin Für die Steuerung des Lichtes: Rot
+const int yellow = D5;                            // Pin Für die Steuerung des Lichtes: Gelb
+const int green = D6;                             // Pin Für die Steuerung des Lichtes: Grün
 const int phase = 50;                            // Die länge der Phase bevor automatisch gewechselt wird
 
 ESP8266WebServer server(80);                      // Webserver Für Server
 
 void switch_to_green() {
+   // repräsentiert eine schaltsequenz zu Grün
+  Serial.print("Switched to step Green");
+  
+  
   digitalWrite(red, LOW);
   delay(50);
   digitalWrite(yellow, HIGH);
@@ -40,6 +44,8 @@ void switch_to_green() {
 }
 
 void switch_to_red() {
+  // repräsentiert eine schaltsequenz zu Rot
+  Serial.print("Switched to step Red");
   digitalWrite(yellow, HIGH);
   delay(500);
   digitalWrite(green, LOW);
@@ -52,7 +58,11 @@ void switch_to_red() {
 
 void createServer() {
   // Erstelle einen Server
+  Serial.println("Nun Master-Server...");
   WiFi.softAP("ampel-hs", "ampel-hs");              
+  IPAddress myIP = WiFi.softAPIP();
+  Serial.print("IP-Adresse: ");
+  Serial.println(myIP);
   // Routen für den Serverbetrieb
   server.on("/", HTTP_GET, [](){
     String html = "<html><body>";
@@ -79,9 +89,11 @@ void createServer() {
     
     String response = "last: " + String(out) + "\nstep: " + String(step);
     server.send(200, "text/plain", response);
+    Serial.println("Client requested");
   });
   // starte den Server
   server.begin();
+  Serial.println("Server started");
 }
 
 void setup() {
@@ -89,12 +101,16 @@ void setup() {
   pinMode(yellow, OUTPUT);
   pinMode(green, OUTPUT);
   pinMode(red, OUTPUT);
+  // Serial 
+  Serial.begin(115200);
   // Setup Network
+  Serial.print("Verbindung zum Netzwerk: ");
   WiFi.begin("ampel-hs", "ampel-hs");
   // while wifi unconnected and within timeout > wait and retry
   while (WiFi.status() != WL_CONNECTED && timeout > 0) {
     digitalWrite(ledPin, HIGH); 
     delay(300);
+    Serial.print(".");
     digitalWrite(ledPin, LOW); 
     delay(700);
     timeout--;
@@ -102,10 +118,12 @@ void setup() {
 
   if (WiFi.status() == WL_CONNECTED) {
     // connected to Network
+    Serial.println("\nMit Netzwerk Verbunden.");
     is_server = false;
   
   } else {
     // create Network 
+    Serial.println("\nErstelle Netzwerk...");
     is_server = true;
     createServer();
   }
@@ -116,16 +134,22 @@ void sendHttpRequest() {
   WiFiClient client;
   HTTPClient http;
 
+  Serial.print("[HTTP] begin...\n");
   if (http.begin(client, "http://192.168.4.1/getparams")) {  // HTTP 
+    Serial.print("[HTTP] GET...\n");
     // start connection and send HTTP header
     int httpCode = http.GET();
 
       // httpCode will be negative on error
       if (httpCode > 0) {
         // HTTP header has been send and Server response header has been handled
+        Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+
         // file found at server
         if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
           String payload = http.getString();
+          Serial.println(payload);
+
           // Parse the received data to update 'last' and 'step' variables
           int outLast = 0;
           int outStep = 0;
@@ -136,16 +160,20 @@ void sendHttpRequest() {
         }
         }
       } else {
-        
+        Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
       }
 
       http.end();
     } else {
+      Serial.printf("[HTTP} Unable to connect\n");
     }
 }
 
 
 void loop() {
+  Serial.print("Timing:");
+  Serial.println(step);
+
   // Ampel Schaltung
   if (step >= phase) {
     step = 0;
@@ -163,6 +191,8 @@ void loop() {
       digitalWrite(green, HIGH);
       last = 1;
     }
+  Serial.print("Umgeschaltet auf: ");
+  Serial.println(last);
   } 
     // wenn zum Netzwerk verbunden und nicht server
   if (is_server != true) {
