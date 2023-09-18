@@ -2,29 +2,40 @@
 #include <ESP8266WiFi.h>
 #include <EEPROM.h>
 #include <ESP8266WebServer.h>
+#include <ESP8266HTTPClient.h>
+#include <WiFiClient.h>
+
+int req = 100;
+int timeout = 30;                                 // Maximale Wartezeit für die Verbindung in Sekunden
+bool is_server = false;                           // If Device is Aserver or Client
+const int ledPin = D5;                            // Der Pin, der anzeigt ob wlan verbunden wird
+const char* ssid = "Ampel";                       // Standard-SSID
+const char* password = "pass";                    // Standard-Passwort
+
+WiFiClient client;
+HTTPClient http;
+
+// Ampel Steuerung
 int step = 0;
 int last = 0;
-const int ledPin = D5;                    // Der Pin, an dem die LED für Wlan angeschlossen ist (interne LED)
-char ssid[] = "Ampel_Hotspot";             // Standard-SSID
-char password[] = "Mht:=0E,g15v9,G9W%6Y$4vjn!bs";     // Standard-Passwort
-char target_ip[] = "192.168.4.1";
-                                          // Ampel Steuerung
-const int red = D4;                       // Pin Für die Steuerung des Lichtes: Rot
-const int yellow = D5;                    // Pin Für die Steuerung des Lichtes: Gelb
-const int green = D6;                     // Pin Für die Steuerung des Lichtes: Grün
-const int phase = 100;                  // Die länge der Phase bevor automatisch gewechselt wird
+const int red = D7;                               // Pin Für die Steuerung des Lichtes: Rot
+const int yellow = D5;                            // Pin Für die Steuerung des Lichtes: Gelb
+const int green = D6;                             // Pin Für die Steuerung des Lichtes: Grün
+const int phase = 50;                            // Die länge der Phase bevor automatisch gewechselt wird
 
-ESP8266WebServer server(80);              // Webserver Für Einrichtung
+ESP8266WebServer server(80);                      // Webserver Für Server
 
 void switch_to_green() {
    // repräsentiert eine schaltsequenz zu Grün
   Serial.print("Switched to step Green");
-  digitalWrite(yellow, HIGH);
-  delay(100);
+  
+  
   digitalWrite(red, LOW);
-  delay(1000);
+  delay(50);
+  digitalWrite(yellow, HIGH);
+  delay(250);
   digitalWrite(yellow, LOW);
-  delay(10);
+  delay(250);
   digitalWrite(green, HIGH);
   last = 1;
 }
@@ -33,99 +44,136 @@ void switch_to_red() {
   // repräsentiert eine schaltsequenz zu Rot
   Serial.print("Switched to step Red");
   digitalWrite(yellow, HIGH);
-  delay(100);
+  delay(500);
   digitalWrite(green, LOW);
-  delay(100);
+  delay(250);
   digitalWrite(yellow, LOW);
+  delay(50);
   digitalWrite(red, HIGH);
   last = 2;
 }
 
-void createHotspot() {
-  Serial.println("Hotspot-Modus wird aktiviert...");
-  
-  WiFi.softAP(ssid, password); // SSID und Passwort für den Hotspot
-  delay(100); // Warte kurz, bis der Hotspot erstellt wird
-
+void createServer() {
+  // Erstelle einen Server
+  Serial.println("Nun Master-Server...");
+  WiFi.softAP("ampel-hs", "ampel-hs");              
   IPAddress myIP = WiFi.softAPIP();
-  Serial.print("Hotspot-IP-Adresse: ");
+  Serial.print("IP-Adresse: ");
   Serial.println(myIP);
-
-  // Routen für die Konfigurationsseite
+  // Routen für den Serverbetrieb
   server.on("/", HTTP_GET, [](){
     String html = "<html><body>";
-    html += "<h1>WiFi-Konfiguration</h1>";
-    html += "<form method='POST' action='/save'>";
-    html += "SSID: <input type='text' name='ssid'><br>";
-    html += "Passwort: <input type='password' name='password'><br>";
-    html += "Link-IP: <input type='text' name='IP'><br>";
-    html += "<input type='submit' value='Speichern'>";
-    html += "</form>";
-    html += "</body></html>";
-    server.send(200, "text/html", html);
+  html += "<h1>Ampelstatus</h1>";
+  // Ampelstatus abfragen und entsprechenden HTML-Code generieren
+  if (last == 1) {
+    html += "<p>Ampel ist auf Grün.</p>";
+  } else if (last == 2) {
+    html += "<p>Ampel ist auf Rot.</p>";
+  } else {
+    html += "<p>Ampel ist im Übergangszustand.</p>";
+  }
+  html += "</body></html>";
+  server.send(200, "text/html", html);
   });
-
-  server.on("/save", HTTP_POST, [](){
+  // Diese Route gibt die aktuellen Werte von last und step zurück (zum syncroniesieren mit andern)
+  server.on("/getparams", HTTP_GET, [](){
+    int out = 0;
+    if (last == 1) {
+      out = 2;
+    } else if (last == 2) {
+      out = 1;
+    } 
     
+    String response = "last: " + String(out) + "\nstep: " + String(step);
+    server.send(200, "text/plain", response);
+    Serial.println("Client requested");
   });
-
+  // starte den Server
   server.begin();
   Serial.println("Server started");
-
 }
 
-void connectToWiFi() {
-  Serial.print("Verbindung zum WLAN-Netzwerk: ");
-  Serial.println(ssid);
-  
-  WiFi.begin(ssid, password);
-
-  int timeout = 20; // Maximale Zeit für die Verbindung in Sekunden
+void setup() {
+  // setze Ample Pins auf output
+  pinMode(yellow, OUTPUT);
+  pinMode(green, OUTPUT);
+  pinMode(red, OUTPUT);
+  // Serial 
+  Serial.begin(115200);
+  // Setup Network
+  Serial.print("Verbindung zum Netzwerk: ");
+  WiFi.begin("ampel-hs", "ampel-hs");
+  // while wifi unconnected and within timeout > wait and retry
   while (WiFi.status() != WL_CONNECTED && timeout > 0) {
-    digitalWrite(ledPin, HIGH); // LED einschalten
-    delay(1000);
+    digitalWrite(ledPin, HIGH); 
+    delay(300);
     Serial.print(".");
-    digitalWrite(ledPin, LOW); // LED ausschalten
-    delay(1000);
+    digitalWrite(ledPin, LOW); 
+    delay(700);
     timeout--;
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nVerbunden mit WiFi.");
+    // connected to Network
+    Serial.println("\nMit Netzwerk Verbunden.");
+    is_server = false;
+  
   } else {
-    Serial.println("\nVerbindung fehlgeschlagen.");
-    createHotspot();
-    Serial.println("\nHotspot Erstellt.");
+    // create Network 
+    Serial.println("\nErstelle Netzwerk...");
+    is_server = true;
+    createServer();
   }
-}
-
-void send_Switch_call() {
 
 }
-void setup() {
-  pinMode(D4, OUTPUT);
-  pinMode(D5, OUTPUT);
-  pinMode(D6, OUTPUT);
-  
-  // Serielle Verbindung
-  Serial.begin(115200);
-  delay(10);
-  Serial.println();
-  connectToWiFi();
-  
 
+void sendHttpRequest() {
+  WiFiClient client;
+  HTTPClient http;
 
-  // Weitere Initialisierung...
+  Serial.print("[HTTP] begin...\n");
+  if (http.begin(client, "http://192.168.4.1/getparams")) {  // HTTP 
+    Serial.print("[HTTP] GET...\n");
+    // start connection and send HTTP header
+    int httpCode = http.GET();
+
+      // httpCode will be negative on error
+      if (httpCode > 0) {
+        // HTTP header has been send and Server response header has been handled
+        Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+
+        // file found at server
+        if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
+          String payload = http.getString();
+          Serial.println(payload);
+
+          // Parse the received data to update 'last' and 'step' variables
+          int outLast = 0;
+          int outStep = 0;
+          if (sscanf(payload.c_str(), "last: %d\nstep: %d", &outLast, &outStep) == 2) {
+          // Successfully parsed the data, update the variables
+            last = outLast;
+            step = outStep;
+        }
+        }
+      } else {
+        Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+      }
+
+      http.end();
+    } else {
+      Serial.printf("[HTTP} Unable to connect\n");
+    }
 }
+
 
 void loop() {
+  Serial.print("Timing:");
   Serial.println(step);
-  server.handleClient(); // Stelle sicher, dass dieser Aufruf regelmäßig erfolgt
+
+  // Ampel Schaltung
   if (step >= phase) {
-    Serial.print("Switched to step");
-    Serial.println(step);
     step = 0;
-    send_Switch_call();
     if (last == 1) {
       switch_to_red();
     }
@@ -137,13 +185,24 @@ void loop() {
       digitalWrite(yellow, HIGH);
       delay(100);
       digitalWrite(yellow, LOW);
+      digitalWrite(green, HIGH);
       last = 1;
     }
+  Serial.print("Umgeschaltet auf: ");
+  Serial.println(last);
   } 
+    // wenn zum Netzwerk verbunden und nicht server
+  if (is_server != true) {
+    if (req <= 0) {
+      sendHttpRequest();
+      req = 76;
+    }
+    req--;
+  }
+  else {
+    server.handleClient();
+  }
   delay(100);
   step ++;
-
-  // Hier kommt der Hauptcode deines Programms
-  // Du kannst die Verbindung zum WLAN überwachen und andere Aufgaben erledigen
 }
 
